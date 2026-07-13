@@ -1,0 +1,33 @@
+{
+  "name": "secure-connect",
+  "version": "1.0.0",
+  "description": "Secure Node.js/Express middleware API that automates physical access control by integrating with the Gallagher security platform, protected by JWT authentication.",
+  "license": "ISC",
+  "author": "Sourav",
+  "type": "module",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/souravsharm/Secure-Connect.git"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon --exec node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "bcryptjs": "^2.4.3",
+    "body-parser": "^2.3.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "uuid": "^11.1.0",
+    "winston": "^3.17.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
