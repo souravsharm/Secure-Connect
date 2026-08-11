@@ -46,13 +46,13 @@ const endpoints = [
         cards: [
           {
             cardType: 'Access',
-            cardNumber: 'ABC123',
+            cardNumber: '555123',
             activationDate: '2023-07-25T00:00:00Z',
             expiryDate: '2027-09-25T00:00:00Z'
           },
           {
             cardType: 'MSIC',
-            cardNumber: 'XYZ789',
+            cardNumber: '555124',
             activationDate: '2023-07-25T00:00:00Z',
             expiryDate: '2027-09-25T00:00:00Z'
           }
@@ -61,7 +61,8 @@ const endpoints = [
     },
     notes: [
       'Minimal required: person.firstName and person.cards (>=1).',
-      'Each card requires: cardType (Access|MSIC), cardNumber (6-9 alphanumeric), activationDate (ISO), expiryDate (ISO, after activation).'
+      'Each card requires: cardType (Access|MSIC), cardNumber (6-9 alphanumeric), activationDate (ISO), expiryDate (ISO, after activation).',
+      'This Gallagher instance rejects letters in card numbers — 555123/555124 are confirmed working; ABC123-style values will 400.'
     ]
   },
   {
@@ -75,7 +76,7 @@ const endpoints = [
         cards: [
           {
             cardType: 'Access',
-            cardNumber: 'ABC123',
+            cardNumber: '555123',
             activationDate: '2023-07-25T00:00:00Z',
             expiryDate: '2027-09-25T00:00:00Z'
           }
@@ -85,7 +86,8 @@ const endpoints = [
     },
     notes: [
       'Minimal required to target: person.firstName.',
-      'Optional: type to update Access card status; payload fields present will be updated.'
+      'Optional: type to update Access card status; payload fields present will be updated.',
+      'cardNumber here must match the Access card already on the cardholder (555123 from the create template) so the app can locate it in Gallagher.'
     ]
   },
   {
@@ -99,7 +101,7 @@ const endpoints = [
         cards: [
           {
             cardType: 'Access',
-            cardNumber: 'ABC123',
+            cardNumber: '555123',
             activationDate: '2023-07-25T00:00:00Z',
             expiryDate: '2027-09-25T00:00:00Z'
           }
@@ -142,6 +144,10 @@ export default function App() {
   const [jsonValue, setJsonValue] = useState(JSON.stringify(selected.minimalBody, null, 2));
   const [apiBaseUrl, setApiBaseUrl] = useState('');
   const [authToken, setAuthToken] = useState('');
+  // Intentionally NOT persisted to localStorage like apiBaseUrl/authToken — this is the
+  // real Gallagher REST Client key, not a short-lived app token, so we keep it in-memory
+  // only for the current tab session.
+  const [gallagherApiKey, setGallagherApiKey] = useState('');
   const [clientCertNote] = useState('Browser cannot present client certificates; run the backend to talk to Gallagher.');
   const [responseText, setResponseText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -218,6 +224,10 @@ export default function App() {
       if (selected.id !== 'login' && authToken?.trim()) {
         headers['Authorization'] = `Bearer ${authToken.trim()}`;
       }
+      const usesGallagherOverride = ['create_cardholder', 'update_cardholder', 'delete_cardholder'].includes(selected.id);
+      if (usesGallagherOverride && gallagherApiKey?.trim()) {
+        headers['X-Gallagher-Api-Key'] = gallagherApiKey.trim();
+      }
       headers['X-Correlation-Id'] = cryptoRandomId();
 
       const config = { url, method: selected.method, headers };
@@ -293,6 +303,14 @@ export default function App() {
                   </Stack>
                   <TextField fullWidth label="API Base URL (optional)" placeholder="http://localhost:3000" value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
                   <TextField fullWidth label="JWT Token" placeholder="obtained from POST /api/v1/auth/login" value={authToken} onChange={(e) => setAuthToken(e.target.value)} />
+                  <TextField
+                    fullWidth
+                    label="Gallagher API Key (optional — operator attribution)"
+                    placeholder="leave blank to use the server's default Gallagher REST Client key"
+                    value={gallagherApiKey}
+                    onChange={(e) => setGallagherApiKey(e.target.value)}
+                    helperText="Only used on create/update/delete cardholder. Sent as X-Gallagher-Api-Key — this is a different credential from the JWT Token above and is never saved between sessions."
+                  />
 
                   <Box>
                     <Typography variant="subtitle1" gutterBottom>Minimal body expectations</Typography>
@@ -309,6 +327,9 @@ export default function App() {
                       {selected.id === 'login'
                         ? 'This request is public and requires no Authorization header.'
                         : `Authorization header will be: Bearer ${authToken ? '******' : '(none — call /auth/login first)'}`}
+                      {['create_cardholder', 'update_cardholder', 'delete_cardholder'].includes(selected.id) && gallagherApiKey && (
+                        <> · X-Gallagher-Api-Key: ******</>
+                      )}
                     </Typography>
                   </Stack>
 

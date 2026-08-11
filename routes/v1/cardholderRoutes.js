@@ -23,7 +23,7 @@ router.post(
     const log = req?.log || logger;
     
     try {
-      const gallagherAdapter = new GallagherAdapter();
+      const gallagherAdapter = new GallagherAdapter(req.headers['x-gallagher-api-key']);
       const cardholderService = new CardholderService(gallagherAdapter);
 
       // Use validated payload from middleware (already unwrapped to person)
@@ -60,7 +60,7 @@ router.patch(
   "/update_cardholder",
   validatePersonBody,
   asyncHandler(async (req, res) => {
-    const gallagherAdapter = new GallagherAdapter();
+    const gallagherAdapter = new GallagherAdapter(req.headers['x-gallagher-api-key']);
     const cardholderService = new CardholderService(gallagherAdapter);
     const { person, type } = req.body;
     await cardholderService.updateCardholder(person, type);
@@ -73,7 +73,7 @@ router.delete(
   validateDeletePersonBody,
   asyncHandler(async (req, res) => {
     const log = req?.log || logger;
-    const gallagherAdapter = new GallagherAdapter();
+    const gallagherAdapter = new GallagherAdapter(req.headers['x-gallagher-api-key']);
     const cardholderService = new CardholderService(gallagherAdapter);
     const { firstName } = req.validated; // from delete validator
 

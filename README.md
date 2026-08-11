@@ -10,8 +10,9 @@ Manually provisioning physical access (creating a cardholder, issuing a card, as
 
 ## Key Features
 
-- **JWT authentication** — every cardholder/cache-management endpoint requires a valid `Authorization: Bearer <token>` issued by `POST /api/v1/auth/login`. Passwords are stored as bcrypt hashes; login attempts are rate-limited per IP to slow brute-force attempts.
-- **Gallagher integration** — mutual-TLS (client certificate) plus API-key authentication to Gallagher's REST API, with an in-memory cache of resource hrefs (cardholders, divisions, access groups, operator groups) to minimize discovery calls.
+- **JWT authentication** — every cardholder/cache-management endpoint requires a valid `Authorization: Bearer <token>` issued by `POST /api/v1/auth/login`. Passwords are stored as bcrypt hashes; login attempts are rate-limited per IP to slow brute-force attempts. This is Secure Connect's own gate — Gallagher itself has no concept of JWT; it only ever sees the separate Gallagher API key described below.
+- **Gallagher integration** — mutual-TLS (client certificate, optional if Gallagher CC is configured to accept clients with none) plus API-key authentication to Gallagher's REST API, with an in-memory cache of resource hrefs (cardholders, divisions, access groups, operator groups) to minimize discovery calls.
+- **Per-operator Gallagher attribution** — `create_cardholder`/`update_cardholder`/`delete_cardholder` accept an optional `X-Gallagher-Api-Key` header. When present, that request's Gallagher-side action is attributed to that specific Gallagher REST Client identity instead of the shared server-configured key — useful when multiple operators use the same Secure Connect deployment but should show up distinctly in Gallagher's own audit trail. Falls back to the server's `GALLAGHER_API_KEY` when omitted. This is a separate, independent credential from the JWT bearer token — do not confuse the two headers.
 - **Service + Adapter architecture** — business logic (`services/CardholderService.js`) is decoupled from the vendor-specific client (`api/gallagher/GallagherAdapter.js`), so new integrations can be added by implementing the same adapter interface.
 - **Request validation** — Zod schemas validate every incoming payload (card types, card-number format, ISO date ordering, required fields) and return structured 400 errors.
 - **Structured, audit-ready logging** — Winston with daily-rotating file transports, correlation IDs propagated across a request's lifecycle, and automatic redaction/masking of names, emails, and card numbers in logs.
@@ -157,18 +158,37 @@ ui/                              React/Vite/MUI API console for exercising the e
    # Gallagher API
    GALLAGHER_API_URL=https://your-gallagher-server:8904
    GALLAGHER_API_KEY=your_gallagher_api_key
+   DEFAULT_ACCESS_GROUP_ID=your_default_access_group_id
+   DEFAULT_DIVISION_NAME=your_default_division_name
+   GALLAGHER_ACCESS_CARD_TYPE_ID=your_access_card_type_id
+   GALLAGHER_MSIC_CARD_TYPE_ID=your_msic_card_type_id
+
+   # Only needed if Gallagher CC requires a client certificate (Command Centre has a
+   # server property to accept REST Clients with no certificate — if that's checked,
+   # omit these two entirely):
    CLIENT_CERT_PATH=../certificates/GallagherRestClientCert.pfx
    CERT_PASSPHRASE=your_certificate_passphrase
    ```
 
-4. **Certificates folder**
+   If Gallagher Command Centre runs on the same machine as this app, use its **LAN IP** (from `ipconfig`/`ifconfig`) for `GALLAGHER_API_URL`, not `127.0.0.1`/`localhost` — Command Centre's REST Client IP allowlist matches on the interface address, and loopback connections get rejected with a bare `401`.
 
-   Create a `certificates/` folder at the project root and place your Gallagher mTLS client certificate (`.pfx`) inside. This folder is gitignored — never commit certificate files.
+   `DEFAULT_DIVISION_NAME`, `DEFAULT_ACCESS_GROUP_ID`, `GALLAGHER_ACCESS_CARD_TYPE_ID`, and `GALLAGHER_MSIC_CARD_TYPE_ID` must exactly match resources that already exist in your Gallagher instance (Configure > Divisions / Access Groups / Card Types in the Gallagher Configuration Client) — every one of these is instance-specific and `create_cardholder` will fail with Gallagher's own validation message if any of them don't match. Fetch your instance's real IDs with:
+   ```bash
+   curl -k "https://<GALLAGHER_API_URL>/api/card_types" -H "Authorization: GGL-API-KEY <your key>"
+   curl -k "https://<GALLAGHER_API_URL>/api/divisions" -H "Authorization: GGL-API-KEY <your key>"
+   ```
+
+   Card number format is also enforced by Gallagher itself, on top of this app's own `6-9 alphanumeric` validation — some instances only accept numeric card numbers for `Access` cards. If `create_cardholder` returns `Invalid card number '...'`, try a numeric-only value.
+
+4. **Certificates folder (optional)**
+
+   Only needed if Gallagher CC requires client certificates. Create a `certificates/` folder at the project root and place your Gallagher mTLS client certificate (`.pfx`) inside. This folder is gitignored — never commit certificate files.
 
 5. **Run the server**
    ```bash
    npm run dev
    ```
+   `nodemon.json` restricts the dev auto-reload watcher to the actual source directories (`server.js`, `routes/`, `middlewares/`, `services/`, `utils/`, `api/`, `config/gallagher.js`) so unrelated file activity elsewhere in the repo doesn't trigger restarts and silently reset the in-memory Gallagher cache.
 
 6. **Run the API console (optional)**
    ```bash
@@ -241,17 +261,29 @@ Validation rules are unified across create/update/delete via `validatePersonBody
 
 ### Cache Management
 
-- `GET /api/v1/cache_status` — cache initialization state and cached hrefs
+- `GET /api/v1/cache_status` — cache initialization state and cached hrefs. Self-warms the cache on a fresh process if it isn't initialized yet, so it doesn't just report an empty cache.
 - `POST /api/v1/clear_cache` — clears the in-memory href cache
-- `GET /api/v1/cached_hrefs` — returns cached Gallagher endpoint hrefs
+- `GET /api/v1/cached_hrefs` — returns cached Gallagher endpoint hrefs (also self-warms)
+
+The href cache is in-memory per process — it resets on every restart, which is expected; the routes above re-populate it automatically on next use.
 
 ### Error Responses
 
-Validation failures return `400`:
+Validation failures (caught before any Gallagher call) return `400`:
 ```json
 { "error": "ValidationError", "issues": [ { "path": "person.cards", "message": "...", "code": "..." } ] }
 ```
+Errors from Gallagher itself (e.g. an invalid division, card type, or duplicate card number) also return the upstream status code, with Gallagher's own message surfaced directly rather than a generic axios error:
+```json
+{ "message": "Invalid card number 'ABC123'", "details": ["Invalid card number 'ABC123'"] }
+```
 Missing/invalid/expired tokens return `401`. Exceeding the login rate limit returns `429`. Unhandled server errors return `500`.
+
+### Known Limitations
+
+- `update_cardholder` currently requires a non-empty `cards` array in every request, even if you only want to change `lastName`/`description`/etc. and aren't touching cards. This is a validation gap (the schema is shared with `create_cardholder`), not a Gallagher limitation.
+- `delete_cardholder` matches by `firstName` only and deletes the first result — if more than one cardholder shares a first name, disambiguate in Gallagher first.
+- There's no way to change an existing card's *type* (Access ↔ MSIC) — Gallagher models that as issuing a new card, not editing one. `update_cardholder`'s `type` field only changes an Access card's *status* (e.g. `Lost`/`Active`).
 
 ## Security Notes
 

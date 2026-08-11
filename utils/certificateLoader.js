@@ -21,24 +21,30 @@ dotenv.config({ path: path.join(__dirname, '..', 'config', 'secrets.env') });
 export function createGallagherAxiosInstance(baseConfig = {}) {
   const apiKey = process.env.GALLAGHER_API_KEY;
   const apiUrl = process.env.GALLAGHER_API_URL;
-  const certPath = path.resolve(__dirname, process.env.CLIENT_CERT_PATH);
-  const pfx = fs.readFileSync(certPath);
   const passphrase = process.env.CERT_PASSPHRASE;
-  
-  
+
+  // Client certificate is optional: only load one if CLIENT_CERT_PATH is set and
+  // the file exists. Gallagher CC can be configured to accept REST clients with
+  // no certificate ("enable clients with no certificate"), in which case we just
+  // rely on the GGL-API-KEY header for authentication.
+  let pfx;
+  if (process.env.CLIENT_CERT_PATH) {
+    const certPath = path.resolve(__dirname, process.env.CLIENT_CERT_PATH);
+    if (fs.existsSync(certPath)) {
+      pfx = fs.readFileSync(certPath);
+    } else {
+      console.warn(`⚠️  CLIENT_CERT_PATH is set but no file was found at ${certPath}; continuing without a client certificate`);
+    }
+  }
+
   console.log('   Loading Gallagher API Configuration:');
   console.log('   API URL:', apiUrl);
   console.log('   API Key:', apiKey ? `${apiKey.substring(0, 8)}...` : 'NOT FOUND');
+  console.log('   Client certificate:', pfx ? 'loaded' : 'none (relying on API key only)');
 
-  
   if (!apiKey) {
     console.error('❌ GALLAGHER_API_KEY not found in environment variables');
     throw new Error('GALLAGHER_API_KEY is required');
-  }
-  
-  if (!pfx) {
-    console.error('❌ CERTIFICATE_PATH not found in environment variables');
-    throw new Error('CERTIFICATE_PATH is required');
   }
 
   if (!apiUrl) {
@@ -46,10 +52,10 @@ export function createGallagherAxiosInstance(baseConfig = {}) {
     throw new Error('GALLAGHER_API_URL is required');
   }
 
-  // Create HTTPS agent for .NET server with proper SSL configuration
+  // Create HTTPS agent with proper SSL configuration. pfx/passphrase are
+  // omitted entirely when no client certificate is configured.
   const httpsAgent = new https.Agent({
-    pfx: pfx,
-    passphrase: passphrase,
+    ...(pfx ? { pfx, passphrase } : {}),
     rejectUnauthorized: process.env.SSL_REJECT_UNAUTHORIZED === 'true'
   });
 

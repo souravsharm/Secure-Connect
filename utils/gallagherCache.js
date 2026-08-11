@@ -1,6 +1,17 @@
 import { createGallagherAxiosInstance } from './certificateLoader.js';
 import logger, { maskCardNumber, redactPII } from './logger.js';
 
+/**
+ * Per-call axios config to override the default GGL-API-KEY with an
+ * operator-supplied one, so a specific action attributes to a specific
+ * Gallagher REST Client identity instead of the shared server default.
+ * Returns {} (no override) when apiKeyOverride is falsy.
+ */
+function authConfig(apiKeyOverride) {
+  if (!apiKeyOverride) return {};
+  return { headers: { Authorization: `GGL-API-KEY ${apiKeyOverride}` } };
+}
+
 class GallagherCache {
   constructor() {
     this.cache = {
@@ -43,14 +54,14 @@ class GallagherCache {
    * Find division href by name
    * @returns {string} The specific href of the division with the given name
    */
-  async findDivisionHrefByName(divisionName) {
+  async findDivisionHrefByName(divisionName, apiKeyOverride) {
     if (!this.cache.divisions) {
       throw new Error('Divisions href not cached. Call cacheBasicHrefs() first.');
     }
 
     try {
       logger.debug('Finding division href by name', { name: (process.env.LOG_SHOW_PII === 'true' ? divisionName : '[REDACTED_NAME]') });
-      const divisions = await this.api.get(this.cache.divisions);
+      const divisions = await this.api.get(this.cache.divisions, authConfig(apiKeyOverride));
       const division = divisions.data.results.find(div => div.name === divisionName);
       
       if (!division) {
@@ -69,14 +80,14 @@ class GallagherCache {
   /**
    * Find operator group href by name
    */
-  async findOperatorGroupByName(groupName) {
+  async findOperatorGroupByName(groupName, apiKeyOverride) {
     if (!this.cache.operatorGroups) {
       throw new Error('Operator groups href not cached. Call cacheBasicHrefs() first.');
     }
 
     try {
       logger.debug('Finding operator group by name', { name: (process.env.LOG_SHOW_PII === 'true' ? groupName : '[REDACTED_NAME]') });
-      const operatorGroups = await this.api.get(this.cache.operatorGroups);
+      const operatorGroups = await this.api.get(this.cache.operatorGroups, authConfig(apiKeyOverride));
       const group = operatorGroups.data.results.find(og => og.name === groupName);
       
       if (!group) {
@@ -95,7 +106,7 @@ class GallagherCache {
   /**
    * Create a cardholder
    */
-  async createCardholder(cardholderData) {
+  async createCardholder(cardholderData, apiKeyOverride) {
     if (!this.cache.cardholders) {
       throw new Error('Cardholders href not cached. Call cacheBasicHrefs() first.');
     }
@@ -103,14 +114,14 @@ class GallagherCache {
     try {
       // Enhanced logging for card numbers
       const cardNumbers = cardholderData.cards?.map(card => maskCardNumber(card.number)) || [];
-      logger.info('Creating cardholder', { 
+      logger.info('Creating cardholder', {
         payload: redactPII(cardholderData),
         cardNumbers: cardNumbers,
         cardTypes: cardholderData.cards?.map(card => card.type?.href?.split('/').pop()) || [],
         totalCards: cardholderData.cards?.length || 0
       });
-      
-      const response = await this.api.post(this.cache.cardholders, cardholderData);
+
+      const response = await this.api.post(this.cache.cardholders, cardholderData, authConfig(apiKeyOverride));
       logger.info('Cardholder created successfully', { 
         href: response.data?.href,
         cardNumbers: cardNumbers
@@ -156,10 +167,10 @@ class GallagherCache {
     }
   }
 
-  async deleteCardholder(cardholderHref) {
+  async deleteCardholder(cardholderHref, apiKeyOverride) {
     try {
       logger.warn('Deleting cardholder', { href: cardholderHref });
-      const response = await this.api.delete(cardholderHref);
+      const response = await this.api.delete(cardholderHref, authConfig(apiKeyOverride));
       logger.info('Cardholder deleted successfully', { href: cardholderHref });
       // console.log('Cardholder deleted successfully');
       return response.data;
@@ -174,13 +185,13 @@ class GallagherCache {
    * Find cardholder href by first name
    * @returns {string} The specific href of the cardholder with the given first name
    */
-  async findCardholderHrefByFirstName(cardholderNameFirstName) {
+  async findCardholderHrefByFirstName(cardholderNameFirstName, apiKeyOverride) {
     if (!this.cache.cardholders) {
       throw new Error('Cardholders href not cached. Call cacheBasicHrefs() first.');
     }
     try {
       logger.debug('Finding cardholder by first name', { name: (process.env.LOG_SHOW_PII === 'true' ? cardholderNameFirstName : '[REDACTED_NAME]') });
-      const cardholders = await this.api.get(`${this.cache.cardholders}?name=${encodeURIComponent(cardholderNameFirstName)}`);
+      const cardholders = await this.api.get(`${this.cache.cardholders}?name=${encodeURIComponent(cardholderNameFirstName)}`, authConfig(apiKeyOverride));
       const cardholderhref = cardholders.data.results[0];
       
       if (!cardholderhref) {
@@ -204,7 +215,7 @@ class GallagherCache {
    * @param {string} cardNumber - The card number to find
    * @returns {Object} The card data containing the href
    */
-  async findCardNumberHref(cardholderHref, cardNumber) {
+  async findCardNumberHref(cardholderHref, cardNumber, apiKeyOverride) {
     if (!this.cache.cardholders) {
       throw new Error('Cardholders href not cached. Call cacheBasicHrefs() first.');
     }
@@ -213,7 +224,8 @@ class GallagherCache {
       const cardholderCards = await this.api.get(`${cardholderHref}`, {
         params: {
           fields: 'cards'
-        }
+        },
+        ...authConfig(apiKeyOverride)
       });
       const cardholderCard = cardholderCards.data.cards.find(card => card.number === cardNumber);
 
@@ -232,13 +244,13 @@ class GallagherCache {
    * @param {Object} cardholderData - The data to update the cardholder with
    * @returns {Object} The updated cardholder data
    */
-  async updateCardholder(cardholderHref, cardholderData) {
+  async updateCardholder(cardholderHref, cardholderData, apiKeyOverride) {
     if (!this.cache.cardholders) {
         throw new Error('Cardholders href not cached. Call cacheBasicHrefs() first.');
       }
     try {
       logger.info('Updating cardholder', { href: cardholderHref, payload: redactPII(cardholderData) });
-      const response = await this.api.patch(cardholderHref, cardholderData);
+      const response = await this.api.patch(cardholderHref, cardholderData, authConfig(apiKeyOverride));
       logger.info('Cardholder updated successfully', { href: cardholderHref });
       // console.log('Cardholder updated successfully');
       return response.data;

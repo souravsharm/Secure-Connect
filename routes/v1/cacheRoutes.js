@@ -8,8 +8,9 @@ const router = express.Router();
 // All cache management routes require a valid JWT (see routes/v1/authRoutes.js for /login)
 router.use(requireAuth);
 
-// Middleware to ensure cache is initialized for certain routes
-router.use(['/create_cardholder', '/update_cardholder', '/delete_cardholder'], ensureCache);
+// cache_status and cached_hrefs self-warm the cache on a fresh process instead of
+// just reporting an empty cache and telling the caller to hit / first.
+router.use(['/cache_status', '/cached_hrefs'], ensureCache);
 
 // Utility routes for cache management
 router.get("/cache_status", (req, res) => {
@@ -25,9 +26,6 @@ router.post("/clear_cache", (req, res) => {
 });
 
 router.get("/cached_hrefs", (req, res) => {
-  if (!gallagherCache.isInitialized()) {
-    return res.status(400).json({ message: "Cache not initialized. Call / first." });
-  }
   res.json(gallagherCache.getCachedHrefs());
 });
 

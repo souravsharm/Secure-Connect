@@ -78,7 +78,14 @@ app.use((err, req, res, next) => {
   } else {
     log.error('Unhandled error caught by error middleware', payload)
   }
-  res.status(status).json({ message: err.message })
+  // Prefer Gallagher's own validation message over axios's generic
+  // "Request failed with status code 4xx" text, so API callers can actually
+  // see why a request was rejected instead of having to read server logs.
+  const upstreamMessage = err?.response?.data?.message
+  res.status(status).json({
+    message: upstreamMessage || err.message,
+    ...(err?.response?.data?.apiMessages ? { details: err.response.data.apiMessages } : {})
+  })
 })
 
 app.listen(port, () => {

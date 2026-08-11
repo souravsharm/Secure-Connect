@@ -1,0 +1,12 @@
+{
+  "watch": [
+    "server.js",
+    "routes",
+    "middlewares",
+    "services",
+    "utils",
+    "api",
+    "config/gallagher.js"
+  ],
+  "ext": "js,json"
+}

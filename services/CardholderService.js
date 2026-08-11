@@ -45,7 +45,7 @@ class CardholderService {
             throw new Error("At least one of firstName or lastName is required");
         }
 
-        const targetDivision = divisionName || "CreateCardholder";
+        const targetDivision = divisionName || process.env.DEFAULT_DIVISION_NAME || "CreateCardholder";
         const divisionHref = await this.apiAdapter.findDivisionHrefByName(targetDivision);
 
         const cardholderData = {
